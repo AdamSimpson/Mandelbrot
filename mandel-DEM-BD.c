@@ -9,14 +9,14 @@
 #define WORKTAG 1
 #define DIETAG 2
 
-struct fracData
+typedef struct
 {
     int startRow;
     int nRows;
     unsigned char *pixels;
-};
+} WORK_DATA;
 
-struct fracInfo
+typedef struct
 {
     int nCols;
     int nRows;
@@ -24,13 +24,13 @@ struct fracInfo
     double yStart;
     double radius;
     double spacing;
-};
+} FRAC_INFO;
 
-unsigned char MSetPixel(const struct fracInfo *info, double cx, double cy)
+unsigned char MSetPixel(const FRAC_INFO *info, double cx, double cy)
 {
 
     static const int maxIter = 500;
-    static const double binBailout = maxIter;
+    static const double binBailout = 500;
     static const double huge = 1e120;
     static const double overflow = 1e300;
 
@@ -101,7 +101,7 @@ unsigned char MSetPixel(const struct fracInfo *info, double cx, double cy)
 
 }
 
-void get_work(const struct fracInfo *info, int *rowsTaken, struct fracData *work)
+void get_work(const FRAC_INFO  *info, int *rowsTaken, WORK_DATA *work)
 {
     if(*rowsTaken >= info->nRows){
         work->nRows = 0;
@@ -116,12 +116,12 @@ void get_work(const struct fracInfo *info, int *rowsTaken, struct fracData *work
     *rowsTaken += numRows;
 }
 
-int get_max_work_size(const struct fracInfo *info)
+int get_max_work_size(const FRAC_INFO *info)
 {
     return 16*info->nCols;
 }
 
-void calcPixels(const struct fracInfo *info, struct fracData *data)
+void calcPixels(const FRAC_INFO *info, WORK_DATA *data)
 {
     int nx = info->nCols;
     int ny = data->nRows;
@@ -140,16 +140,16 @@ void calcPixels(const struct fracInfo *info, struct fracData *data)
     }
 }
 
-void master(const struct fracInfo info)
+void master(const FRAC_INFO *info)
 {
     int ntasks, dest, msgsize;
-    struct fracData *work = malloc(sizeof(*work));
+    WORK_DATA *work = malloc(sizeof(*work));
     MPI_Status status;
     int rowsTaken = 0;
 
     MPI_Comm_size(MPI_COMM_WORLD, &ntasks);    
 
-    size_t size = sizeof(unsigned char) * (unsigned long)info.nCols * (unsigned long)info.nRows;
+    size_t size = sizeof(unsigned char) * (unsigned long)info->nCols * (unsigned long)info->nRows;
     unsigned char *fractal = (unsigned char*)malloc(size);
     if(!fractal) {
         printf("fractal allocation failed, %lu bytes\n", size);
@@ -164,7 +164,7 @@ void master(const struct fracInfo info)
     emptysize = membersize;
     MPI_Pack_size(1, MPI_INT, MPI_COMM_WORLD, &membersize);
     emptysize += membersize;
-    MPI_Pack_size(get_max_work_size(&info), MPI_UNSIGNED_CHAR, MPI_COMM_WORLD, &membersize);
+    MPI_Pack_size(get_max_work_size(info), MPI_UNSIGNED_CHAR, MPI_COMM_WORLD, &membersize);
     fullsize = emptysize + membersize;
 
     buffer = malloc(fullsize);    
@@ -176,7 +176,7 @@ void master(const struct fracInfo info)
     // Send initial data
     for (dest = 1; dest < ntasks; dest++) {
         //Get next work item
-        get_work(&info,&rowsTaken,work);
+        get_work(info,&rowsTaken,work);
         
         //pack and send work       
         position = 0;
@@ -187,7 +187,7 @@ void master(const struct fracInfo info)
 
     printf("sent initial work\n");
     //Get next work item
-    get_work(&info,&rowsTaken,work);
+    get_work(info,&rowsTaken,work);
     int startRow, nRows;
     while(work->nRows) {
         // Recieve and unpack work
@@ -196,7 +196,7 @@ void master(const struct fracInfo info)
         MPI_Get_count(&status, MPI_PACKED, &msgsize);
         MPI_Unpack(buffer, msgsize, &position, &startRow,1,MPI_INT,MPI_COMM_WORLD);
         MPI_Unpack(buffer, msgsize, &position, &nRows,1,MPI_INT,MPI_COMM_WORLD);    
-        MPI_Unpack(buffer, msgsize, &position, fractal+((unsigned long)startRow*info.nCols), nRows*info.nCols, MPI_UNSIGNED_CHAR, MPI_COMM_WORLD);
+        MPI_Unpack(buffer, msgsize, &position, fractal+((unsigned long)startRow*info->nCols), nRows*info->nCols, MPI_UNSIGNED_CHAR, MPI_COMM_WORLD);
 
         //pack and send work       
         position = 0;
@@ -205,7 +205,7 @@ void master(const struct fracInfo info)
         MPI_Send(buffer, position, MPI_PACKED, status.MPI_SOURCE, WORKTAG, MPI_COMM_WORLD);
 
         //Get next work item
-        get_work(&info,&rowsTaken,work);
+        get_work(info,&rowsTaken,work);
 
         if(status.MPI_SOURCE==1)
             printf("%d\n",work->startRow);
@@ -221,7 +221,7 @@ void master(const struct fracInfo info)
         MPI_Unpack(buffer, msgsize, &position, &startRow,1,MPI_INT,MPI_COMM_WORLD);
         MPI_Unpack(buffer, msgsize, &position, &nRows,1,MPI_INT,MPI_COMM_WORLD);
         // unpack pixel data
-        MPI_Unpack(buffer, msgsize, &position, fractal+((unsigned long)startRow*info.nCols), nRows*info.nCols, MPI_UNSIGNED_CHAR, MPI_COMM_WORLD);
+        MPI_Unpack(buffer, msgsize, &position, fractal+((unsigned long)startRow*info->nCols), nRows*info->nCols, MPI_UNSIGNED_CHAR, MPI_COMM_WORLD);
 
         // Kill slaves
         MPI_Send(0,0,MPI_INT,dest,DIETAG,MPI_COMM_WORLD);
@@ -231,15 +231,15 @@ void master(const struct fracInfo info)
     free(buffer);
 
     //Save image as TIFF
-    unsigned int nx = info.nCols;
-    unsigned int ny = info.nRows;
+    unsigned int nx = info->nCols;
+    unsigned int ny = info->nRows;
     char fileName[] = "/home/pi/Mandelbrot/Mandelbrot.tiff";
     TIFF *out = TIFFOpen(fileName, "w");
     uint32 tileDim = 256;
     tsize_t tileBytes = tileDim*tileDim*sizeof(char);
     unsigned char *buf = (unsigned char *)_TIFFmalloc(tileBytes);
     char description[1024];
-    snprintf(description, sizeof(description),"xStart:%f yStart:%f spacing:%f",info.xStart,info.yStart,info.spacing);
+    snprintf(description, sizeof(description),"xStart:%f yStart:%f spacing:%f",info->xStart,info->yStart,info->spacing);
     TIFFSetField(out, TIFFTAG_IMAGEDESCRIPTION, description);
     TIFFSetField(out, TIFFTAG_IMAGEWIDTH, (uint32) nx);
     TIFFSetField(out, TIFFTAG_IMAGELENGTH, (uint32) ny);
@@ -279,12 +279,12 @@ void master(const struct fracInfo info)
     free(fractal);
 }
 
-void slave(const struct fracInfo info)
+void slave(const FRAC_INFO *info)
 {
     MPI_Status status;
     int msgsize;
-    struct fracData *data = malloc(sizeof(*data));
-    data->pixels = (unsigned char*)malloc(get_max_work_size(&info)*sizeof(unsigned char));  
+    WORK_DATA *data = malloc(sizeof(*data));
+    data->pixels = (unsigned char*)malloc(get_max_work_size(info)*sizeof(unsigned char));  
 
     // Allocate buffers
     int membersize, emptysize, fullsize;
@@ -294,7 +294,7 @@ void slave(const struct fracInfo info)
     emptysize = membersize;
     MPI_Pack_size(1, MPI_INT, MPI_COMM_WORLD, &membersize);
     emptysize += membersize;
-    MPI_Pack_size(get_max_work_size(&info), MPI_UNSIGNED_CHAR, MPI_COMM_WORLD, &membersize);
+    MPI_Pack_size(get_max_work_size(info), MPI_UNSIGNED_CHAR, MPI_COMM_WORLD, &membersize);
     fullsize = emptysize+membersize;
     buffer = malloc(fullsize);
 
@@ -313,20 +313,20 @@ void slave(const struct fracInfo info)
         MPI_Unpack(buffer, msgsize, &position, &data->nRows,1,MPI_INT,MPI_COMM_WORLD);
 
         // calcPixels
-        calcPixels(&info, data);        
+        calcPixels(info, data);        
 
         // Pack and send data back
         position = 0;
         MPI_Pack(&data->startRow,1,MPI_INT,buffer,fullsize,&position,MPI_COMM_WORLD);
         MPI_Pack(&data->nRows,1,MPI_INT,buffer,fullsize,&position,MPI_COMM_WORLD);
-        MPI_Pack(data->pixels, data->nRows*info.nCols, MPI_UNSIGNED_CHAR,buffer,fullsize,&position,MPI_COMM_WORLD);
+        MPI_Pack(data->pixels, data->nRows*info->nCols, MPI_UNSIGNED_CHAR,buffer,fullsize,&position,MPI_COMM_WORLD);
         MPI_Send(buffer, position, MPI_PACKED, 0, WORKTAG, MPI_COMM_WORLD);
     }
 }
 
 int main(int argc, char *argv[])
 {
-    struct fracInfo info;
+    FRAC_INFO info;
     //Dimensions of grid
     const double xMin = -.745429-0.000030;
     const double xMax = xMin + 0.000060;
@@ -355,10 +355,10 @@ int main(int argc, char *argv[])
 
     if (myrank == 0){
         printf("Resolution: %dx%d\n", nx, ny);
-        master(info);
+        master(&info);
     }
     else
-        slave(info);
+        slave(&info);
 
     MPI_Finalize();
 
