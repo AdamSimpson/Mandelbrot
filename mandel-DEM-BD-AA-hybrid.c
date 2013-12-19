@@ -9,8 +9,6 @@
 #define WORKTAG 1
 #define DIETAG 2
 
-#define USE_GPU 0
-
 struct fracData
 {
     int startRow;
@@ -126,14 +124,16 @@ unsigned char MSetPixel(const struct fracInfo *info, double cx, double cy)
                 yOrbit = y;
             }
         
-        
-            if(dist <= radius) {
-                pixVal += (1.0-pow(dist/radius,1.0/3.0))*info->AAweight[subCx+subCy*AA];
-            }
-//            else if(iter > 30)
-//                pixVal += 1.0*info->AAweight[subCx+subCy*AA];
-//            else if(yBailout > 0)
-//                pixVal += 0.0;
+            // Distance estimator coloring
+            if(dist <= radius)
+                pixVal += pow(dist/radius, 1.0/3.0)*info->AAweight[subCx+subCy*AA];
+	    // "Padding" between binary and distance
+            else if(iter > 30)
+                pixVal += 1.0*info->AAweight[subCx+subCy*AA];
+	    // Binary black
+            else if(yBailout > 0)
+                pixVal += 0.0;
+	    // Binary white
             else
                 pixVal += 1.0*info->AAweight[subCx+subCy*AA];
         
@@ -278,8 +278,7 @@ void master(const struct fracInfo info)
     //Save image as TIFF
     unsigned int nx = info.nCols;
     unsigned int ny = info.nRows;
-    char fileName[256];
-    snprintf(fileName, sizeof(fileName),"/tmp/work/atj/Mandelbrot-%s.tiff",getenv("PBS_JOBID"));
+    char fileName[] = "/home/pi/Mandelbrot/Mandelbrot.tiff";
     TIFF *out = TIFFOpen(fileName, "w");
     uint32 tileDim = 256;
     tsize_t tileBytes = tileDim*tileDim*sizeof(char);
@@ -380,11 +379,11 @@ int main(int argc, char *argv[])
     const double yMax = 1.8;
 
     //number of pixels in x and y
-    const int nx = 1500;
+    const int nx = 600;
     const int ny = ceil(nx*(yMax-yMin)/(xMax-xMin));
     const double spacing = (xMax-xMin)/(nx-1);
 
-    info.AA = 32; //AntiAliasing is NxN
+    info.AA = 2; //AntiAliasing is NxN
     info.AAweight = malloc(info.AA*info.AA*sizeof(double));
     const double threshold = 1.0;
 
